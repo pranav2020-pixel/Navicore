@@ -1,0 +1,29 @@
+id,name,x,y,category
+G1,Main North Gate,200,80,Gate
+G2,South Campus Gate,200,820,Gate
+G3,Technology Innovation Gate,1220,160,Gate
+G4,Residential Quarters Gate,1220,780,Gate
+ADM,Administrative Senate & Admissions,400,180,Academic
+LIB,Central Research Library,650,220,Academic
+CS,Computer Science & AI Complex,880,180,Academic
+EE,Electrical & Robotics Engineering,1060,240,Academic
+ME,Mechanical & Aerospace Workshop,1060,400,Academic
+CE,Civil & Environmental Center,900,480,Academic
+BT,Biotechnology & Nanotech Labs,700,380,Academic
+LHC,Lecture Hall Complex,480,340,Academic
+AUD,Grand Auditorium & Convention Hall,320,440,Facility
+SAC,Student Activity Center,480,560,Facility
+CAF1,Central Food Court & Plaza,680,540,Cafeteria
+CAF2,Lakeside Bistro & Cafe,340,660,Cafeteria
+H1,Newton Boys Hostel,860,700,Residential
+H2,Einstein Boys Hostel,1040,700,Residential
+H3,Curie Girls Hostel,680,740,Residential
+H4,Franklin Girls Hostel,500,740,Residential
+MED,Campus Health Center & Clinic,200,340,Facility
+SPO,Indoor Sports Pavilion,1220,380,Sports
+GYM,Olympic Fitness & Gym,1220,520,Sports
+STD,University Athletic Stadium,1040,560,Sports
+POOL,Aquatics & Swimming Complex,1220,680,Sports
+OAT,Open Air Amphitheatre,380,560,Facility
+PAR1,North Multi-Level Parking,200,200,Facility
+PAR2,South Student Parking,340,820,Facility

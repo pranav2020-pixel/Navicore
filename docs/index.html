@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Navigation System - Dual Campus & City Engine</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="app-layout">
+    <!-- TOP NAVIGATION BAR -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="3 11 22 2 13 21 11 13 3 11"></polygon>
+          </svg>
+        </div>
+        <div>
+          <h1 class="brand-title">NaviCore <span class="brand-badge">C++ DSA</span></h1>
+          <p class="brand-subtitle">High-Performance Graph Routing & Real-Time Detour Engine</p>
+        </div>
+      </div>
+
+      <!-- MAP SWITCHER TOGGLE -->
+      <div class="map-switcher">
+        <button id="btnMapCampus" class="switch-btn active" onclick="switchMap('campus')">
+          <span class="icon">🎓</span> College Campus
+          <span class="count-pill" id="campusPill">28 Nodes</span>
+        </button>
+        <button id="btnMapCity" class="switch-btn" onclick="switchMap('city')">
+          <span class="icon">🏙️</span> Smart City
+          <span class="count-pill" id="cityPill">32 Nodes</span>
+        </button>
+      </div>
+
+      <!-- ENGINE STATUS -->
+      <div class="engine-status">
+        <span class="status-dot"></span>
+        <span id="engineStatusLabel">C++ Engine Connected</span>
+      </div>
+    </header>
+
+    <!-- MAIN WORKSPACE -->
+    <main class="main-content">
+      <!-- SIDEBAR CONTROLS -->
+      <aside class="sidebar">
+        <div class="panel-section">
+          <h2 class="section-title">Navigation Controls</h2>
+          
+          <!-- ORIGIN -->
+          <div class="input-group">
+            <label for="selectStart"><span class="label-dot origin-dot"></span> Starting Origin</label>
+            <div class="select-wrapper">
+              <select id="selectStart"></select>
+            </div>
+          </div>
+
+          <!-- DESTINATION -->
+          <div class="input-group">
+            <label for="selectTarget"><span class="label-dot target-dot"></span> Destination Target</label>
+            <div class="select-wrapper">
+              <select id="selectTarget"></select>
+            </div>
+          </div>
+
+          <!-- ALGORITHM & METRIC -->
+          <div class="grid-2">
+            <div class="input-group">
+              <label for="selectAlgo">Algorithm</label>
+              <select id="selectAlgo">
+                <option value="astar" selected>A* (Euclidean Heuristic)</option>
+                <option value="dijkstra">Dijkstra (Uniform Cost)</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label for="selectMetric">Cost Metric</label>
+              <select id="selectMetric">
+                <option value="distance" selected>Shortest Distance</option>
+                <option value="time">Fastest Time (Traffic)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- ACTION BUTTONS -->
+          <div class="action-buttons">
+            <button id="btnFindRoute" class="btn btn-primary" onclick="calculateRoute()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+              Find Optimal Route
+            </button>
+            <button id="btnCompare" class="btn btn-secondary" onclick="runBenchmark()">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M18 20V10M12 20V4M6 20v-6"></path></svg>
+              Compare A* vs Dijkstra
+            </button>
+            <button id="btnClear" class="btn btn-ghost" onclick="clearRoute()">
+              Clear Selection & Hazards
+            </button>
+          </div>
+        </div>
+
+        <!-- HAZARDS & ROAD CLOSURES -->
+        <div class="panel-section">
+          <div class="section-header-row">
+            <h2 class="section-title">Road Blockages & Detours</h2>
+            <span class="hazard-count" id="hazardCountBadge">0 Active</span>
+          </div>
+          <p class="section-hint">Click any road on the map or toggle below to simulate real-time detours:</p>
+          <div class="hazard-list" id="hazardListContainer">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+
+        <!-- TURN-BY-TURN INSTRUCTIONS -->
+        <div class="panel-section guidance-section">
+          <h2 class="section-title">Turn-by-Turn Guidance</h2>
+          <div class="directions-container" id="directionsList">
+            <div class="empty-state">Select origin and destination to generate live route guidance.</div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- MAP VIEWPORT AND HUD -->
+      <section class="map-container">
+        <!-- BENCHMARK HUD OVERLAY -->
+        <div class="hud-overlay">
+          <div class="hud-card">
+            <span class="hud-label">Total Distance</span>
+            <span class="hud-value" id="hudDistance">--</span>
+          </div>
+          <div class="hud-card">
+            <span class="hud-label">Est. Travel Time</span>
+            <span class="hud-value" id="hudTime">--</span>
+          </div>
+          <div class="hud-card">
+            <span class="hud-label">Nodes Explored</span>
+            <span class="hud-value" id="hudNodes">--</span>
+          </div>
+          <div class="hud-card">
+            <span class="hud-label">C++ Compute Time</span>
+            <span class="hud-value highlight" id="hudLatency">--</span>
+          </div>
+        </div>
+
+        <!-- MAP CANVAS CONTROLS -->
+        <div class="map-toolbar">
+          <button class="tool-btn" onclick="zoomIn()" title="Zoom In">+</button>
+          <button class="tool-btn" onclick="zoomOut()" title="Zoom Out">−</button>
+          <button class="tool-btn" onclick="resetZoom()" title="Reset View">⊙</button>
+          <span class="map-legend-pill"><span class="legend-dot open-dot"></span> Open Road</span>
+          <span class="map-legend-pill"><span class="legend-dot blocked-dot"></span> Hazard Blocked</span>
+          <span class="map-legend-pill"><span class="legend-dot route-dot"></span> Active Route</span>
+        </div>
+
+        <!-- SVG INTERACTIVE CANVAS -->
+        <div class="svg-viewport" id="svgViewport">
+          <svg id="mapSvg" viewBox="0 0 1440 960" preserveAspectRatio="xMidYMid meet">
+            <defs>
+              <!-- Animated linear gradient for active route -->
+              <linearGradient id="routeGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+                <stop offset="0%" stop-color="#38bdf8" />
+                <stop offset="50%" stop-color="#818cf8" />
+                <stop offset="100%" stop-color="#c084fc" />
+              </linearGradient>
+
+              <!-- Glow filter -->
+              <filter id="glow" x="-30%" y="-30%" width="160%" height="160%">
+                <feGaussianBlur stdDeviation="6" result="blur" />
+                <feMerge>
+                  <feMergeNode in="blur" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
+
+            <!-- Map background grid -->
+            <rect width="100%" height="100%" fill="#0a0f1d" />
+            <g id="gridLayer" opacity="0.15"></g>
+
+            <!-- Edges Layer -->
+            <g id="edgesLayer"></g>
+
+            <!-- Active Route Layer -->
+            <g id="routeLayer"></g>
+
+            <!-- Nodes Layer -->
+            <g id="nodesLayer"></g>
+          </svg>
+        </div>
+
+        <!-- BOTTOM BENCHMARK COMPARISON DRAWER -->
+        <div class="comparison-drawer" id="comparisonDrawer">
+          <div class="drawer-header">
+            <h3>Algorithm Benchmark: A* vs Dijkstra</h3>
+            <button class="close-drawer-btn" onclick="closeBenchmarkDrawer()">×</button>
+          </div>
+          <div class="drawer-content" id="benchmarkTable">
+            <!-- Dynamic comparison cards -->
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,33 @@
+id,name,x,y,category
+AIR,Metropolitan International Airport,180,100,Transit
+AET,Airport Express Terminal,340,140,Transit
+LOG,Airport Cargo & Logistics Zone,120,240,Business
+CYB,Cyber City Silicon Towers,540,120,Business
+ITP,Innovation & Biotech Park,760,100,Business
+NSUB,North Suburban Residential,960,110,Residential
+STN,Grand Central Railway Station,520,280,Transit
+MET,City Metro Interchange,700,260,Transit
+FIN,Global Financial District,880,240,Business
+WTC,World Trade Center,1080,240,Business
+BRG1,Skyline River Suspension Bridge,240,380,Transit
+RIV,Green Riverfront Promenade,260,520,Recreation
+WFB,West Waterfront Marina,120,500,Residential
+DTN,Downtown Central Square,500,420,Residential
+HALL,City Hall & Civic Secretariat,680,400,Public
+CRT,High Court & Justice Complex,880,380,Public
+MAL,Metropolis Megamall & Cinema,1080,380,Business
+HOSP1,District General Hospital,480,560,Medical
+HOSP2,Apex Super-Specialty Medical Center,860,520,Medical
+POL,City Police Headquarters,680,540,Public
+FIRE,Emergency Response Fire Station,1040,520,Public
+UNIV,Metropolitan State University,360,700,Public
+BOT,Central Botanical Gardens,560,700,Recreation
+HER,Historic Heritage Fort & Museum,740,680,Recreation
+ARENA,National Olympic Stadium,920,680,Recreation
+ISBT,Inter-State Bus Terminal,1120,660,Transit
+SRH,South Ridge Residential Enclave,340,820,Residential
+PORT,South Bay Harbor & Ferry Terminal,540,840,Transit
+HBR,Maritime Customs & Coast Guard,740,820,Public
+IND,Industrial & Distribution Hub,940,820,Business
+EXPO,International Convention & Expo,1140,800,Business
+GATE,Grand Southern Gateway Arch,740,920,Public
