@@ -1,11 +1,11 @@
 # 🚀 NaviCore: Dual-Map Campus & Smart City Navigation System
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-Interactive_Web_App-0284c7?style=for-the-badge&logo=googlechrome&logoColor=white)](https://pranav-bhardwaj.github.io/navicore-navigation-system/)
-[![GitHub Pages](https://img.shields.io/badge/Deploy-GitHub_Pages-brightgreen?style=for-the-badge&logo=github)](https://pranav-bhardwaj.github.io/navicore-navigation-system/)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Interactive_Web_App-0284c7?style=for-the-badge&logo=googlechrome&logoColor=white)](https://pranav2020-pixel.github.io/navicore-navigation-system/)
+[![GitHub Pages](https://img.shields.io/badge/Deploy-GitHub_Pages-brightgreen?style=for-the-badge&logo=github)](https://pranav2020-pixel.github.io/navicore-navigation-system/)
 [![C++14](https://img.shields.io/badge/Language-C++14-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
 [![Algorithms](https://img.shields.io/badge/DSA-A*_&_Dijkstra-f59e0b?style=for-the-badge)](https://en.wikipedia.org/wiki/A*_search_algorithm)
 
-> 🌐 **Live Interactive Web Demo**: **[Launch Live Navigation Map & Routing Demo](https://pranav-bhardwaj.github.io/navicore-navigation-system/)**
+> 🌐 **Live Interactive Web Demo**: **[Launch Live Navigation Map & Routing Demo](https://pranav2020-pixel.github.io/navicore-navigation-system/)**
 > 
 > *Test live shortest path routing, switch between College Campus (28 nodes) and Smart City (32 nodes), click on roads to trigger dynamic hazard detours, and benchmark A\* vs. Dijkstra directly in your browser!*
 
@@ -141,8 +141,8 @@ To push this repository to your new GitHub repo:
 ```bash
 cd projectsite
 
-# 1. Add your GitHub remote repository (replace with your repo URL):
-git remote add origin https://github.com/<your-username>/<your-repo-name>.git
+# 1. Add your GitHub remote repository (replace <your-repo-name> with your repo):
+git remote add origin https://github.com/pranav2020-pixel/<your-repo-name>.git
 
 # 2. Push all code to main branch:
 git branch -M main
