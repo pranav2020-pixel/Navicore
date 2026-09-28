@@ -119,26 +119,6 @@ Provides an interactive text menu with live options:
 
 ---
 
-## 🌐 Enabling Live Demo on GitHub Pages (2-Click Setup)
 
-Once pushed to your GitHub repository, enable the free web demo:
-1. Go to your GitHub repository on `github.com`.
-2. Click **Settings** ⚙️ -> **Pages** (under Code and automation in the left sidebar).
-3. Under **Build and deployment** > **Branch**:
-   - Select Branch: `main`
-   - Select Folder: `/ (root)` or `/docs`
-   - Click **Save**.
-4. GitHub will deploy your live demo within 30-60 seconds at:
-   `https://pranav2020-pixel.github.io/Navicore/`
-*(The live demo runs 100% in the browser using the integrated client-side A\*/Dijkstra solver and SVG engine with zero server maintenance required!)*
 
----
-
-## 🐙 Git Remote
-
-Repository remote is configured to:
-```bash
-git remote add origin https://github.com/pranav2020-pixel/Navicore.git
-git push -u origin main
-```
 
