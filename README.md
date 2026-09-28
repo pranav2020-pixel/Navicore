@@ -1,11 +1,11 @@
 # 🚀 NaviCore: Dual-Map Campus & Smart City Navigation System
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-Interactive_Web_App-0284c7?style=for-the-badge&logo=googlechrome&logoColor=white)](https://pranav2020-pixel.github.io/navicore-navigation-system/)
-[![GitHub Pages](https://img.shields.io/badge/Deploy-GitHub_Pages-brightgreen?style=for-the-badge&logo=github)](https://pranav2020-pixel.github.io/navicore-navigation-system/)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Interactive_Web_App-0284c7?style=for-the-badge&logo=googlechrome&logoColor=white)](https://pranav2020-pixel.github.io/Navicore/)
+[![GitHub Pages](https://img.shields.io/badge/Deploy-GitHub_Pages-brightgreen?style=for-the-badge&logo=github)](https://pranav2020-pixel.github.io/Navicore/)
 [![C++14](https://img.shields.io/badge/Language-C++14-00599C?style=for-the-badge&logo=c%2B%2B&logoColor=white)](https://isocpp.org/)
 [![Algorithms](https://img.shields.io/badge/DSA-A*_&_Dijkstra-f59e0b?style=for-the-badge)](https://en.wikipedia.org/wiki/A*_search_algorithm)
 
-> 🌐 **Live Interactive Web Demo**: **[Launch Live Navigation Map & Routing Demo](https://pranav2020-pixel.github.io/navicore-navigation-system/)**
+> 🌐 **Live Interactive Web Demo**: **[Launch Live Navigation Map & Routing Demo](https://pranav2020-pixel.github.io/Navicore/)**
 > 
 > *Test live shortest path routing, switch between College Campus (28 nodes) and Smart City (32 nodes), click on roads to trigger dynamic hazard detours, and benchmark A\* vs. Dijkstra directly in your browser!*
 
@@ -129,23 +129,16 @@ Once pushed to your GitHub repository, enable the free web demo:
    - Select Folder: `/ (root)` or `/docs`
    - Click **Save**.
 4. GitHub will deploy your live demo within 30-60 seconds at:
-   `https://<your-username>.github.io/<your-repo-name>/`
+   `https://pranav2020-pixel.github.io/Navicore/`
 *(The live demo runs 100% in the browser using the integrated client-side A\*/Dijkstra solver and SVG engine with zero server maintenance required!)*
 
 ---
 
-## 🐙 Git Push Commands
+## 🐙 Git Remote
 
-To push this repository to your new GitHub repo:
-
+Repository remote is configured to:
 ```bash
-cd projectsite
-
-# 1. Add your GitHub remote repository (replace <your-repo-name> with your repo):
-git remote add origin https://github.com/pranav2020-pixel/<your-repo-name>.git
-
-# 2. Push all code to main branch:
-git branch -M main
+git remote add origin https://github.com/pranav2020-pixel/Navicore.git
 git push -u origin main
 ```
 
