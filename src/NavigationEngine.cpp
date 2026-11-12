@@ -7,6 +7,49 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+namespace {
+
+// Turn classification, in degrees of heading change between two road segments.
+const double STRAIGHT_LIMIT_DEG = 25.0;   // under this: keep going straight
+const double U_TURN_LIMIT_DEG   = 155.0;  // over this: double back
+
+// Escapes a value for a JSON string literal.
+std::string jsonEscape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size());
+    for (char c : s) {
+        switch (c) {
+            case '"':  out += "\\\""; break;
+            case '\\': out += "\\\\"; break;
+            case '\n': out += "\\n";  break;
+            case '\r': out += "\\r";  break;
+            case '\t': out += "\\t";  break;
+            default:
+                if (static_cast<unsigned char>(c) < 0x20) {
+                    std::ostringstream hex;
+                    hex << "\\u" << std::hex << std::setw(4) << std::setfill('0') << static_cast<int>(c);
+                    out += hex.str();
+                } else {
+                    out += c;
+                }
+        }
+    }
+    return out;
+}
+
+std::string quoted(const std::string& s) { return "\"" + jsonEscape(s) + "\""; }
+
+// Real road length for the segment ending at nodes[i]; falls back to straight-line distance.
+double segmentLength(const Graph& graph, const RouteResult& route, size_t i) {
+    if (i == 0 || i > route.pathRoads.size()) return 0.0;
+    double metres = graph.roadLength(route.pathNodes[i - 1], route.pathRoads[i - 1]);
+    if (metres >= 0.0) return metres;
+    return PathFinder::calculateEuclideanDistance(graph.getLandmark(route.pathNodes[i - 1]),
+                                                  graph.getLandmark(route.pathNodes[i]));
+}
+
+} // namespace
+
 std::vector<TurnInstruction> NavigationEngine::generateDirections(const Graph& graph,
                                                                  const RouteResult& route) {
     std::vector<TurnInstruction> instructions;
@@ -15,53 +58,50 @@ std::vector<TurnInstruction> NavigationEngine::generateDirections(const Graph& g
     const auto& nodes = route.pathNodes;
     int stepNum = 1;
 
-    // Step 1: Departure
     const Landmark& startLm = graph.getLandmark(nodes[0]);
     TurnInstruction depart;
     depart.stepNumber = stepNum++;
     depart.landmarkId = startLm.id;
     depart.landmarkName = startLm.name;
-    depart.action = "Depart";
+    depart.action = "Start";
     depart.segmentDistanceMeters = 0.0;
 
     if (nodes.size() == 1) {
-        depart.detailedText = "You are already at your destination: " + startLm.name;
+        depart.detailedText = "You are already at " + startLm.name + ".";
         instructions.push_back(depart);
         return instructions;
     }
 
-    const Landmark& firstNext = graph.getLandmark(nodes[1]);
-    depart.detailedText = "Depart from " + startLm.name + " heading towards " + firstNext.name;
+    depart.detailedText = "Leave " + startLm.name + " toward " + graph.getLandmark(nodes[1]).name;
     instructions.push_back(depart);
 
-    // Intermediate turn steps
     for (size_t i = 1; i + 1 < nodes.size(); ++i) {
         const Landmark& prev = graph.getLandmark(nodes[i - 1]);
         const Landmark& curr = graph.getLandmark(nodes[i]);
         const Landmark& next = graph.getLandmark(nodes[i + 1]);
 
-        double v1x = curr.x - prev.x;
-        double v1y = curr.y - prev.y;
-        double v2x = next.x - curr.x;
-        double v2y = next.y - curr.y;
-
-        // In screen/SVG coordinates (Y down):
-        // cross > 0: Clockwise (Turn Right)
-        // cross < 0: Counter-Clockwise (Turn Left)
+        // Heading change via cross and dot products. Screen coordinates have Y pointing down,
+        // so a positive cross product is a clockwise (right) turn.
+        double v1x = curr.x - prev.x, v1y = curr.y - prev.y;
+        double v2x = next.x - curr.x, v2y = next.y - curr.y;
         double cross = v1x * v2y - v1y * v2x;
         double dot = v1x * v2x + v1y * v2y;
-        double angleRad = std::atan2(cross, dot);
-        double angleDeg = angleRad * (180.0 / M_PI);
+        double angleDeg = std::atan2(cross, dot) * (180.0 / M_PI);
 
         std::string action;
-        if (std::abs(angleDeg) < 25.0) {
-            action = "Continue Straight";
-        } else if (angleDeg > 25.0 && angleDeg < 155.0) {
-            action = "Turn Right";
-        } else if (angleDeg < -25.0 && angleDeg > -155.0) {
-            action = "Turn Left";
+        std::string text;
+        if (std::fabs(angleDeg) < STRAIGHT_LIMIT_DEG) {
+            action = "Go straight";
+            text = "Go straight past " + curr.name + " toward " + next.name;
+        } else if (std::fabs(angleDeg) > U_TURN_LIMIT_DEG) {
+            action = "Make a U-turn";
+            text = "Make a U-turn at " + curr.name + " toward " + next.name;
+        } else if (angleDeg > 0) {
+            action = "Turn right";
+            text = "Turn right at " + curr.name + " toward " + next.name;
         } else {
-            action = "Make a U-Turn";
+            action = "Turn left";
+            text = "Turn left at " + curr.name + " toward " + next.name;
         }
 
         TurnInstruction step;
@@ -69,21 +109,19 @@ std::vector<TurnInstruction> NavigationEngine::generateDirections(const Graph& g
         step.landmarkId = curr.id;
         step.landmarkName = curr.name;
         step.action = action;
-        step.segmentDistanceMeters = PathFinder::calculateEuclideanDistance(prev, curr);
-        step.detailedText = "At " + curr.name + ", " + action + " towards " + next.name;
+        step.segmentDistanceMeters = segmentLength(graph, route, i);
+        step.detailedText = text;
         instructions.push_back(step);
     }
 
-    // Final step: Arrival
     const Landmark& destLm = graph.getLandmark(nodes.back());
-    const Landmark& secondLastLm = graph.getLandmark(nodes[nodes.size() - 2]);
     TurnInstruction arrive;
     arrive.stepNumber = stepNum++;
     arrive.landmarkId = destLm.id;
     arrive.landmarkName = destLm.name;
     arrive.action = "Arrive";
-    arrive.segmentDistanceMeters = PathFinder::calculateEuclideanDistance(secondLastLm, destLm);
-    arrive.detailedText = "Arrive at destination: " + destLm.name;
+    arrive.segmentDistanceMeters = segmentLength(graph, route, nodes.size() - 1);
+    arrive.detailedText = "Arrive at " + destLm.name;
     instructions.push_back(arrive);
 
     return instructions;
@@ -92,47 +130,42 @@ std::vector<TurnInstruction> NavigationEngine::generateDirections(const Graph& g
 std::string NavigationEngine::exportRouteToJSON(const Graph& graph,
                                                const RouteResult& route,
                                                const std::vector<TurnInstruction>& directions) {
+    (void)graph;
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2);
     ss << "{\n";
     ss << "  \"success\": " << (route.success ? "true" : "false") << ",\n";
-    ss << "  \"algorithm\": \"" << route.algorithmUsed << "\",\n";
-    ss << "  \"start\": \"" << route.startId << "\",\n";
-    ss << "  \"target\": \"" << route.targetId << "\",\n";
+    ss << "  \"algorithm\": " << quoted(route.algorithmUsed) << ",\n";
+    ss << "  \"start\": " << quoted(route.startId) << ",\n";
+    ss << "  \"target\": " << quoted(route.targetId) << ",\n";
     ss << "  \"totalDistance\": " << route.totalDistanceMeters << ",\n";
     ss << "  \"totalTimeSeconds\": " << route.totalTimeSeconds << ",\n";
     ss << "  \"nodesExplored\": " << route.nodesExplored << ",\n";
     ss << "  \"executionMicroseconds\": " << route.executionMicroseconds << ",\n";
-    ss << "  \"statusMessage\": \"" << route.statusMessage << "\",\n";
+    ss << "  \"statusMessage\": " << quoted(route.statusMessage) << ",\n";
 
-    // Path nodes
     ss << "  \"pathNodes\": [";
     for (size_t i = 0; i < route.pathNodes.size(); ++i) {
-        ss << "\"" << route.pathNodes[i] << "\"";
-        if (i + 1 < route.pathNodes.size()) ss << ", ";
+        ss << quoted(route.pathNodes[i]) << (i + 1 < route.pathNodes.size() ? ", " : "");
     }
     ss << "],\n";
 
-    // Path roads
     ss << "  \"pathRoads\": [";
     for (size_t i = 0; i < route.pathRoads.size(); ++i) {
-        ss << "\"" << route.pathRoads[i] << "\"";
-        if (i + 1 < route.pathRoads.size()) ss << ", ";
+        ss << quoted(route.pathRoads[i]) << (i + 1 < route.pathRoads.size() ? ", " : "");
     }
     ss << "],\n";
 
-    // Turn-by-turn guidance
     ss << "  \"directions\": [\n";
     for (size_t i = 0; i < directions.size(); ++i) {
         const auto& d = directions[i];
-        ss << "    {\n";
-        ss << "      \"step\": " << d.stepNumber << ",\n";
-        ss << "      \"landmarkId\": \"" << d.landmarkId << "\",\n";
-        ss << "      \"landmarkName\": \"" << d.landmarkName << "\",\n";
-        ss << "      \"action\": \"" << d.action << "\",\n";
-        ss << "      \"instruction\": \"" << d.detailedText << "\",\n";
-        ss << "      \"segmentDistance\": " << d.segmentDistanceMeters << "\n";
-        ss << "    }" << (i + 1 < directions.size() ? "," : "") << "\n";
+        ss << "    {\"step\": " << d.stepNumber
+           << ", \"landmarkId\": " << quoted(d.landmarkId)
+           << ", \"landmarkName\": " << quoted(d.landmarkName)
+           << ", \"action\": " << quoted(d.action)
+           << ", \"instruction\": " << quoted(d.detailedText)
+           << ", \"segmentDistance\": " << d.segmentDistanceMeters << "}"
+           << (i + 1 < directions.size() ? "," : "") << "\n";
     }
     ss << "  ]\n";
     ss << "}\n";
@@ -143,28 +176,26 @@ std::string NavigationEngine::exportGraphToJSON(const Graph& graph) {
     std::ostringstream ss;
     ss << std::fixed << std::setprecision(2);
     ss << "{\n";
-    
-    // Landmarks
+
     ss << "  \"nodes\": [\n";
     const auto& lmMap = graph.getLandmarks();
     size_t count = 0;
     for (const auto& pair : lmMap) {
         const auto& lm = pair.second;
-        ss << "    {\"id\": \"" << lm.id << "\", \"name\": \"" << lm.name
-           << "\", \"x\": " << lm.x << ", \"y\": " << lm.y
-           << ", \"category\": \"" << lm.category << "\"}";
+        ss << "    {\"id\": " << quoted(lm.id) << ", \"name\": " << quoted(lm.name)
+           << ", \"x\": " << lm.x << ", \"y\": " << lm.y
+           << ", \"category\": " << quoted(lm.category) << "}";
         if (++count < lmMap.size()) ss << ",";
         ss << "\n";
     }
     ss << "  ],\n";
 
-    // Edges
     ss << "  \"edges\": [\n";
     const auto& edges = graph.getAllEdges();
     for (size_t i = 0; i < edges.size(); ++i) {
         const auto& e = edges[i];
-        ss << "    {\"id\": \"" << e.id << "\", \"from\": \"" << e.from
-           << "\", \"to\": \"" << e.to << "\", \"distance\": " << e.distance
+        ss << "    {\"id\": " << quoted(e.id) << ", \"from\": " << quoted(e.from)
+           << ", \"to\": " << quoted(e.to) << ", \"distance\": " << e.distance
            << ", \"speedLimit\": " << e.speedLimit
            << ", \"isOneWay\": " << (e.isOneWay ? "true" : "false")
            << ", \"isBlocked\": " << (e.isBlocked ? "true" : "false") << "}";

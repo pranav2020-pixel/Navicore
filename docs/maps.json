@@ -1,0 +1,12 @@
+{
+  "maps": [
+    {
+      "id": "campus",
+      "label": "Campus"
+    },
+    {
+      "id": "city",
+      "label": "City"
+    }
+  ]
+}

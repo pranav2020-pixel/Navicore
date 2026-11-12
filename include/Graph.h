@@ -13,6 +13,12 @@ private:
     std::unordered_map<std::string, std::vector<Edge>> adjList;
     std::vector<Edge> allEdges;
 
+    // Derived from the loaded data so the A* heuristic stays admissible on any map:
+    // the smallest ratio of road length (metres) to straight-line coordinate distance,
+    // and the highest speed limit on any road.
+    double minMetresPerUnit;
+    double maxSpeedKmh;
+
 public:
     Graph();
 
@@ -33,6 +39,12 @@ public:
 
     int getVertexCount() const { return static_cast<int>(landmarks.size()); }
     int getEdgeCount() const { return static_cast<int>(allEdges.size()); }
+
+    double getMinMetresPerUnit() const { return minMetresPerUnit; }
+    double getMaxSpeedKmh() const { return maxSpeedKmh; }
+
+    // Length in metres of the road `roadId` leaving `from`, or a negative value if absent.
+    double roadLength(const std::string& from, const std::string& roadId) const;
 };
 
 #endif // GRAPH_H

@@ -1,16 +1,19 @@
 /**
- * NaviCore Navigation Engine - Frontend Controller
- * Connects to C++ backend via server.py with full client-side fallback
+ * NaviCore Route Planner - Frontend Controller
+ * Discovers maps from /api/maps (or maps.json when opened standalone)
+ * and routes via the C++ engine with a matching client-side fallback.
  */
 
-let activeMap = 'campus'; // 'campus' | 'city'
+let availableMaps = [];
+let activeMap = '';
 let graphData = { nodes: [], edges: [] };
-let blockedRoads = new Set();
+let closedRoads = new Set();
 let selectedStart = '';
 let selectedTarget = '';
 let isServerConnected = false;
+let currentRouteNodes = new Set();
 
-// Zoom and Pan State
+// Pan & Zoom state
 let zoomLevel = 1.0;
 let panX = 0;
 let panY = 0;
@@ -18,75 +21,155 @@ let isPanning = false;
 let startPanX = 0;
 let startPanY = 0;
 
-// Category color palettes
-const CATEGORY_COLORS = {
-  // Campus Categories
-  Gate: '#f59e0b',       // Amber
-  Academic: '#38bdf8',   // Sky Blue
-  Residential: '#10b981',// Emerald
-  Facility: '#c084fc',   // Purple
-  Cafeteria: '#fb923c',  // Orange
-  Sports: '#06b6d4',     // Cyan
-  // City Categories
-  Transit: '#06b6d4',    // Cyan
-  Business: '#38bdf8',   // Blue
-  Public: '#eab308',     // Yellow
-  Medical: '#f43f5e',    // Rose
-  Recreation: '#10b981'  // Emerald
-};
-
-document.addEventListener('DOMContentLoaded', () => {
-  initEngineStatus();
-  loadMapData(activeMap);
+document.addEventListener('DOMContentLoaded', async () => {
+  setupMobileMenu();
   setupPanZoom();
+  await initEngineStatus();
+  await loadAvailableMaps();
 });
 
+function setupMobileMenu() {
+  const toggle = document.getElementById('menuToggle');
+  const sidebar = document.getElementById('sidebar');
+  if (!toggle || !sidebar) return;
+
+  toggle.addEventListener('click', () => {
+    const isOpen = sidebar.classList.toggle('is-open');
+    toggle.setAttribute('aria-expanded', String(isOpen));
+  });
+}
+
 async function initEngineStatus() {
+  const label = document.getElementById('engineStatusLabel');
+  const dot = document.querySelector('.status-dot');
   try {
-    const res = await fetch('/api/status', { method: 'GET' });
+    const res = await fetch('/api/status');
     if (res.ok) {
-      const data = await res.json();
       isServerConnected = true;
-      document.getElementById('engineStatusLabel').textContent = 'C++ Engine Connected (Port 8000)';
-      document.querySelector('.engine-status').style.borderColor = 'rgba(16, 185, 129, 0.4)';
+      label.textContent = 'Using C++ engine';
+      if (dot) dot.classList.remove('standalone');
+      return;
     }
-  } catch (e) {
-    isServerConnected = false;
-    document.getElementById('engineStatusLabel').textContent = 'Direct Client Engine (Standalone)';
-    document.querySelector('.status-dot').style.backgroundColor = '#f59e0b';
+  } catch (_) {
+    // Running statically without server.py
+  }
+  isServerConnected = false;
+  label.textContent = 'Running in browser';
+  if (dot) dot.classList.add('standalone');
+}
+
+async function loadAvailableMaps() {
+  try {
+    let res = isServerConnected ? await fetch('/api/maps') : null;
+    if (!res || !res.ok) res = await fetch('maps.json');
+    const data = await res.json();
+    availableMaps = data.maps || [];
+  } catch (err) {
+    console.error('Could not load map list:', err);
+    availableMaps = [];
+  }
+
+  renderMapTabs();
+  if (availableMaps.length > 0) {
+    await switchMap(availableMaps[0].id);
   }
 }
 
-async function switchMap(mapName) {
-  if (activeMap === mapName) return;
-  activeMap = mapName;
+function renderMapTabs() {
+  const container = document.getElementById('mapTabs');
+  container.innerHTML = '';
 
-  document.getElementById('btnMapCampus').classList.toggle('active', mapName === 'campus');
-  document.getElementById('btnMapCity').classList.toggle('active', mapName === 'city');
-
-  blockedRoads.clear();
-  selectedStart = '';
-  selectedTarget = '';
-  clearRoute();
-  await loadMapData(mapName);
+  availableMaps.forEach((m) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `map-tab ${m.id === activeMap ? 'active' : ''}`;
+    btn.dataset.mapId = m.id;
+    btn.innerHTML = `<span>${escapeHtml(m.label)}</span><span class="tab-count" id="tabCount-${escapeHtml(m.id)}"></span>`;
+    btn.addEventListener('click', () => switchMap(m.id));
+    container.appendChild(btn);
+  });
 }
 
-async function loadMapData(mapName) {
+async function switchMap(mapId) {
+  if (activeMap === mapId) return;
+  activeMap = mapId;
+
+  document.querySelectorAll('.map-tab').forEach((tab) => {
+    tab.classList.toggle('active', tab.dataset.mapId === mapId);
+  });
+
+  const info = availableMaps.find((m) => m.id === mapId);
+  const titleEl = document.getElementById('sheetTitle');
+  if (titleEl && info) {
+    titleEl.textContent = `${info.label} route planner`;
+  }
+
+  closedRoads.clear();
+  currentRouteNodes.clear();
+  closeBenchmarkDrawer();
+  hideNotice();
+  resetZoom();
+
+  await loadMapData(mapId);
+  await calculateRoute();
+}
+
+async function loadMapData(mapId) {
   try {
-    let res = null;
-    if (isServerConnected) {
-      res = await fetch(`/api/graph?map=${mapName}`);
-    }
-    if (!res || !res.ok) {
-      res = await fetch(`${mapName}_graph.json`);
-    }
+    let res = isServerConnected ? await fetch(`/api/graph?map=${encodeURIComponent(mapId)}`) : null;
+    if (!res || !res.ok) res = await fetch(`${mapId}_graph.json`);
     graphData = await res.json();
+
+    const countEl = document.getElementById(`tabCount-${mapId}`);
+    if (countEl) countEl.textContent = `${graphData.nodes.length} places`;
+
+    fitViewBoxToNodes();
     populateDropdowns();
     renderMap();
-    updateHazardUI();
+    updateClosedRoadsUI();
   } catch (err) {
+    showNotice('Could not load this map. Check that the map data file exists.');
     console.error('Failed to load map data:', err);
   }
+}
+
+// Fits the SVG coordinate frame to whatever node coordinates the loaded map uses.
+function fitViewBoxToNodes() {
+  const svg = document.getElementById('mapSvg');
+  if (!svg || !graphData.nodes.length) return;
+
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  graphData.nodes.forEach((n) => {
+    if (n.x < minX) minX = n.x;
+    if (n.y < minY) minY = n.y;
+    if (n.x > maxX) maxX = n.x;
+    if (n.y > maxY) maxY = n.y;
+  });
+
+  const padX = Math.max(90, (maxX - minX) * 0.1);
+  const padY = Math.max(60, (maxY - minY) * 0.12);
+  const width = Math.max(200, (maxX - minX) + padX * 2);
+  const height = Math.max(200, (maxY - minY) + padY * 2);
+  svg.setAttribute('viewBox', `${minX - padX} ${minY - padY} ${width} ${height}`);
+}
+
+// Picks a sensible initial pair (the two farthest places on the map) without hardcoding IDs.
+function pickInitialPair(nodes) {
+  if (nodes.length === 0) return ['', ''];
+  if (nodes.length === 1) return [nodes[0].id, nodes[0].id];
+
+  let bestA = nodes[0], bestB = nodes[nodes.length - 1], maxD = -1;
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = i + 1; j < nodes.length; j++) {
+      const d = Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y);
+      if (d > maxD) {
+        maxD = d;
+        bestA = nodes[i];
+        bestB = nodes[j];
+      }
+    }
+  }
+  return [bestA.id, bestB.id];
 }
 
 function populateDropdowns() {
@@ -95,41 +178,29 @@ function populateDropdowns() {
   startSelect.innerHTML = '';
   targetSelect.innerHTML = '';
 
-  // Sort nodes alphabetically by name
-  const sortedNodes = [...graphData.nodes].sort((a, b) => a.name.localeCompare(b.name));
-
-  sortedNodes.forEach(node => {
-    const optA = document.createElement('option');
-    optA.value = node.id;
-    optA.textContent = `[${node.id}] ${node.name} (${node.category})`;
-    startSelect.appendChild(optA);
-
-    const optB = document.createElement('option');
-    optB.value = node.id;
-    optB.textContent = `[${node.id}] ${node.name} (${node.category})`;
-    targetSelect.appendChild(optB);
+  const sorted = [...graphData.nodes].sort((a, b) => a.name.localeCompare(b.name));
+  sorted.forEach((node) => {
+    const label = `${node.name} (${node.id})`;
+    startSelect.add(new Option(label, node.id));
+    targetSelect.add(new Option(label, node.id));
   });
 
-  // Sensible default selections
-  if (activeMap === 'campus') {
-    startSelect.value = 'G1';
-    targetSelect.value = 'POOL';
-  } else {
-    startSelect.value = 'AIR';
-    targetSelect.value = 'PORT';
-  }
-
-  selectedStart = startSelect.value;
-  selectedTarget = targetSelect.value;
+  const [defStart, defTarget] = pickInitialPair(graphData.nodes);
+  startSelect.value = defStart;
+  targetSelect.value = defTarget;
+  selectedStart = defStart;
+  selectedTarget = defTarget;
 
   startSelect.onchange = () => {
     selectedStart = startSelect.value;
-    updateNodeHighlights();
+    calculateRoute();
   };
   targetSelect.onchange = () => {
     selectedTarget = targetSelect.value;
-    updateNodeHighlights();
+    calculateRoute();
   };
+  document.getElementById('selectAlgo').onchange = () => calculateRoute();
+  document.getElementById('selectMetric').onchange = () => calculateRoute();
 }
 
 function renderMap() {
@@ -141,11 +212,9 @@ function renderMap() {
   nodesLayer.innerHTML = '';
   routeLayer.innerHTML = '';
 
-  const nodeMap = new Map();
-  graphData.nodes.forEach(n => nodeMap.set(n.id, n));
+  const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n]));
 
-  // 1. Draw Edges
-  graphData.edges.forEach(edge => {
+  graphData.edges.forEach((edge) => {
     const u = nodeMap.get(edge.from);
     const v = nodeMap.get(edge.to);
     if (!u || !v) return;
@@ -155,65 +224,44 @@ function renderMap() {
     line.setAttribute('y1', u.y);
     line.setAttribute('x2', v.x);
     line.setAttribute('y2', v.y);
-    line.setAttribute('class', `map-edge ${blockedRoads.has(edge.id) ? 'blocked' : ''}`);
+    line.setAttribute('class', `map-edge ${closedRoads.has(edge.id) ? 'blocked' : ''}`);
     line.setAttribute('id', `edge-${edge.id}`);
-    line.setAttribute('data-id', edge.id);
+    line.addEventListener('click', () => toggleRoadClosed(edge.id));
 
-    // Click on edge to toggle blocked/detour
-    line.addEventListener('click', () => toggleRoadBlock(edge.id));
-
-    // Tooltip
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `Road [${edge.id}]: ${u.name} ↔ ${v.name} (${edge.distance}m, ${edge.speedLimit}km/h)`;
+    title.textContent = `${u.name} to ${v.name} (${formatDistance(edge.distance)}, ${edge.speedLimit} km/h). Click to close or reopen.`;
     line.appendChild(title);
 
     edgesLayer.appendChild(line);
   });
 
-  // 2. Draw Nodes
-  graphData.nodes.forEach(node => {
+  graphData.nodes.forEach((node) => {
     const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
     g.setAttribute('class', 'node-group');
     g.setAttribute('id', `node-group-${node.id}`);
     g.setAttribute('transform', `translate(${node.x}, ${node.y})`);
 
-    // Halo pulse ring for start/target
-    const halo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    halo.setAttribute('class', 'node-halo');
-    halo.setAttribute('r', '16');
-    halo.setAttribute('fill', 'none');
-    halo.setAttribute('stroke', 'none');
+    const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    ring.setAttribute('class', 'node-ring');
+    ring.setAttribute('r', '13');
 
-    // Outer circle
-    const outer = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    outer.setAttribute('r', '10');
-    outer.setAttribute('fill', '#111827');
-    outer.setAttribute('stroke', CATEGORY_COLORS[node.category] || '#38bdf8');
-    outer.setAttribute('stroke-width', '2.5');
-
-    // Inner core
     const core = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     core.setAttribute('class', 'node-core');
-    core.setAttribute('r', '5');
-    core.setAttribute('fill', CATEGORY_COLORS[node.category] || '#38bdf8');
+    core.setAttribute('r', '7');
 
-    // Label
-    const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    text.setAttribute('class', 'node-label');
-    text.setAttribute('y', '-14');
-    text.textContent = node.name;
+    const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+    label.setAttribute('class', 'node-label');
+    label.setAttribute('y', '-13');
+    label.textContent = node.name;
 
-    // Tooltip
     const title = document.createElementNS('http://www.w3.org/2000/svg', 'title');
-    title.textContent = `[${node.id}] ${node.name} (${node.category})`;
+    title.textContent = `${node.name} (${node.category})`;
+
     g.appendChild(title);
-
-    g.appendChild(halo);
-    g.appendChild(outer);
+    g.appendChild(ring);
     g.appendChild(core);
-    g.appendChild(text);
+    g.appendChild(label);
 
-    // Click to select start/target
     g.addEventListener('click', (e) => {
       e.stopPropagation();
       handleNodeClick(node.id);
@@ -234,18 +282,23 @@ function handleNodeClick(nodeId) {
     selectedTarget = '';
     startSelect.value = nodeId;
     clearRouteDisplayOnly();
+    updateNodeHighlights();
   } else if (selectedStart && !selectedTarget) {
-    if (selectedStart === nodeId) return; // Same node
+    if (selectedStart === nodeId) return;
     selectedTarget = nodeId;
     targetSelect.value = nodeId;
     calculateRoute();
   }
-  updateNodeHighlights();
 }
 
 function updateNodeHighlights() {
-  document.querySelectorAll('.node-group').forEach(g => {
-    g.classList.remove('is-start', 'is-target');
+  document.querySelectorAll('.node-group').forEach((g) => {
+    g.classList.remove('is-start', 'is-target', 'is-on-route');
+  });
+
+  currentRouteNodes.forEach((id) => {
+    const el = document.getElementById(`node-group-${id}`);
+    if (el) el.classList.add('is-on-route');
   });
 
   if (selectedStart) {
@@ -258,45 +311,49 @@ function updateNodeHighlights() {
   }
 }
 
-function toggleRoadBlock(roadId) {
-  if (blockedRoads.has(roadId)) {
-    blockedRoads.delete(roadId);
-  } else {
-    blockedRoads.add(roadId);
-  }
+function toggleRoadClosed(roadId) {
+  if (closedRoads.has(roadId)) closedRoads.delete(roadId);
+  else closedRoads.add(roadId);
 
-  // Update SVG line class
   const edgeEl = document.getElementById(`edge-${roadId}`);
-  if (edgeEl) {
-    edgeEl.classList.toggle('blocked', blockedRoads.has(roadId));
-  }
+  if (edgeEl) edgeEl.classList.toggle('blocked', closedRoads.has(roadId));
 
-  updateHazardUI();
-
-  // If a route is currently visible, recalculate automatically to show the detour!
-  if (selectedStart && selectedTarget) {
-    calculateRoute();
-  }
+  updateClosedRoadsUI();
+  if (selectedStart && selectedTarget) calculateRoute();
 }
 
-function updateHazardUI() {
-  const countBadge = document.getElementById('hazardCountBadge');
-  const container = document.getElementById('hazardListContainer');
-  countBadge.textContent = `${blockedRoads.size} Active`;
+function reopenAllRoads() {
+  closedRoads.clear();
+  document.querySelectorAll('.map-edge').forEach((e) => e.classList.remove('blocked'));
+  updateClosedRoadsUI();
+  if (selectedStart && selectedTarget) calculateRoute();
+}
 
-  if (blockedRoads.size === 0) {
-    container.innerHTML = '<div style="color: var(--text-muted); font-size: 0.72rem; font-style: italic;">No active roadblocks. Click any road on the map to block it.</div>';
+function updateClosedRoadsUI() {
+  const badge = document.getElementById('hazardCountBadge');
+  const container = document.getElementById('hazardListContainer');
+  badge.textContent = `${closedRoads.size} closed`;
+  badge.classList.toggle('has-closed', closedRoads.size > 0);
+
+  if (closedRoads.size === 0) {
+    container.innerHTML = '<p class="muted-note">All roads are open.</p>';
     return;
   }
 
+  const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n.name]));
   container.innerHTML = '';
-  blockedRoads.forEach(roadId => {
-    const edge = graphData.edges.find(e => e.id === roadId);
+
+  closedRoads.forEach((roadId) => {
+    const edge = graphData.edges.find((e) => e.id === roadId);
+    const label = edge
+      ? `${nodeMap.get(edge.from) || edge.from} to ${nodeMap.get(edge.to) || edge.to}`
+      : roadId;
+
     const item = document.createElement('div');
-    item.className = 'hazard-item active';
+    item.className = 'hazard-item';
     item.innerHTML = `
-      <span>⚠️ <b>${roadId}</b>: ${edge ? edge.from + ' ↔ ' + edge.to : 'Road'}</span>
-      <button class="hazard-btn" onclick="toggleRoadBlock('${roadId}')" title="Clear Blockage">✕</button>
+      <span class="hazard-road-name" title="${escapeHtml(label)}">${escapeHtml(label)}</span>
+      <button type="button" class="hazard-reopen" onclick="toggleRoadClosed('${escapeHtml(roadId)}')">Reopen</button>
     `;
     container.appendChild(item);
   });
@@ -310,10 +367,7 @@ async function calculateRoute() {
 
   if (!selectedStart || !selectedTarget) return;
 
-  updateNodeHighlights();
-
   let routeResult = null;
-
   if (isServerConnected) {
     try {
       const resp = await fetch('/api/route', {
@@ -323,21 +377,18 @@ async function calculateRoute() {
           map: activeMap,
           start: selectedStart,
           target: selectedTarget,
-          algo: algo,
-          metric: metric,
-          blockedRoads: Array.from(blockedRoads)
-        })
+          algo,
+          metric,
+          blockedRoads: Array.from(closedRoads),
+        }),
       });
-      if (resp.ok) {
-        routeResult = await resp.json();
-      }
-    } catch (e) {
-      console.warn('Backend call failed, using client fallback:', e);
+      if (resp.ok) routeResult = await resp.json();
+    } catch (err) {
+      console.warn('Backend unavailable, using browser solver:', err);
     }
   }
 
-  // Client-side fallback if offline
-  if (!routeResult || !routeResult.success) {
+  if (!routeResult) {
     routeResult = solveRouteClient(selectedStart, selectedTarget, algo, metric);
   }
 
@@ -345,154 +396,197 @@ async function calculateRoute() {
 }
 
 function displayRoute(res) {
+  const routeLayer = document.getElementById('routeLayer');
+  const dirContainer = document.getElementById('directionsList');
+
   if (!res || !res.success) {
-    alert(res ? res.statusMessage : 'No reachable route found due to road closures.');
+    routeLayer.innerHTML = '';
+    currentRouteNodes.clear();
+    updateNodeHighlights();
+    document.getElementById('hudDistance').textContent = '-';
+    document.getElementById('hudTime').textContent = '-';
+    document.getElementById('hudNodes').textContent = res ? `${res.nodesExplored} of ${graphData.nodes.length}` : '-';
+    document.getElementById('hudLatency').textContent = '-';
+    dirContainer.innerHTML = '<p class="muted-note">No open route connects these two places.</p>';
+    showNotice('No open route connects these two places. Reopen a closed road to continue.');
     return;
   }
 
-  // Update HUD
-  document.getElementById('hudDistance').textContent = `${res.totalDistance.toFixed(0)} m`;
-  document.getElementById('hudTime').textContent = `${(res.totalTimeSeconds / 60).toFixed(1)} min`;
-  document.getElementById('hudNodes').textContent = res.nodesExplored;
-  document.getElementById('hudLatency').textContent = `${res.executionMicroseconds} µs`;
+  hideNotice();
 
-  // Draw Route on SVG
-  const routeLayer = document.getElementById('routeLayer');
+  document.getElementById('hudDistance').textContent = formatDistance(res.totalDistance);
+  document.getElementById('hudTime').textContent = formatDuration(res.totalTimeSeconds);
+  document.getElementById('hudNodes').textContent = `${res.nodesExplored} of ${graphData.nodes.length}`;
+  document.getElementById('hudLatency').textContent = formatLatency(res.executionMicroseconds);
+
+  const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n]));
+  const subtitle = document.getElementById('sheetSubtitle');
+  const startName = nodeMap.get(res.start)?.name || res.start;
+  const targetName = nodeMap.get(res.target)?.name || res.target;
+  if (subtitle) {
+    subtitle.textContent = `${startName} to ${targetName}`;
+  }
+
+  currentRouteNodes = new Set(res.pathNodes || []);
+  updateNodeHighlights();
+
   routeLayer.innerHTML = '';
-
-  const nodeMap = new Map();
-  graphData.nodes.forEach(n => nodeMap.set(n.id, n));
-
   if (res.pathNodes.length > 1) {
     let d = '';
-    for (let i = 0; i < res.pathNodes.length; ++i) {
-      const lm = nodeMap.get(res.pathNodes[i]);
-      if (!lm) continue;
-      d += (i === 0 ? `M ${lm.x} ${lm.y} ` : `L ${lm.x} ${lm.y} `);
-    }
-
-    // Outer glow track
-    const pathBg = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    pathBg.setAttribute('d', d);
-    pathBg.setAttribute('class', 'route-path-bg');
-
-    // Inner pulsing animated stroke
+    res.pathNodes.forEach((id, idx) => {
+      const lm = nodeMap.get(id);
+      if (lm) d += (idx === 0 ? `M ${lm.x} ${lm.y} ` : `L ${lm.x} ${lm.y} `);
+    });
     const pathMain = document.createElementNS('http://www.w3.org/2000/svg', 'path');
     pathMain.setAttribute('d', d);
     pathMain.setAttribute('class', 'route-path-main');
-
-    routeLayer.appendChild(pathBg);
     routeLayer.appendChild(pathMain);
   }
 
-  // Update Directions List in Sidebar
-  const dirContainer = document.getElementById('directionsList');
   dirContainer.innerHTML = '';
-
   if (res.directions && res.directions.length > 0) {
-    res.directions.forEach(d => {
-      const stepEl = document.createElement('div');
-      stepEl.className = 'direction-step';
-
-      let actionIcon = '⬆️';
-      if (d.action === 'Depart') actionIcon = '🛫';
-      else if (d.action === 'Turn Right') actionIcon = '➡️';
-      else if (d.action === 'Turn Left') actionIcon = '⬅️';
-      else if (d.action === 'Arrive') actionIcon = '🏁';
-      else if (d.action.includes('U-Turn')) actionIcon = '🔄';
-
-      stepEl.innerHTML = `
-        <span class="step-badge">#${d.step}</span>
-        <div class="step-info">
-          <span class="step-action">${actionIcon} ${d.action}</span>
-          <span class="step-desc">${d.instruction}</span>
-        </div>
+    res.directions.forEach((step) => {
+      const row = document.createElement('div');
+      row.className = 'direction-step';
+      const distLabel = step.segmentDistance > 0 ? formatDistance(step.segmentDistance) : '';
+      row.innerHTML = `
+        <span class="step-text">${step.step}. ${escapeHtml(step.instruction)}</span>
+        ${distLabel ? `<span class="step-dist">${distLabel}</span>` : ''}
       `;
-      dirContainer.appendChild(stepEl);
+      dirContainer.appendChild(row);
     });
   }
 }
 
 function clearRouteDisplayOnly() {
   document.getElementById('routeLayer').innerHTML = '';
-  document.getElementById('directionsList').innerHTML = '<div class="empty-state">Select destination to compute route.</div>';
-  document.getElementById('hudDistance').textContent = '--';
-  document.getElementById('hudTime').textContent = '--';
-  document.getElementById('hudNodes').textContent = '--';
-  document.getElementById('hudLatency').textContent = '--';
+  currentRouteNodes.clear();
+  document.getElementById('directionsList').innerHTML = '<p class="muted-note">Pick a destination on the map to see directions.</p>';
+  document.getElementById('hudDistance').textContent = '-';
+  document.getElementById('hudTime').textContent = '-';
+  document.getElementById('hudNodes').textContent = '-';
+  document.getElementById('hudLatency').textContent = '-';
+  hideNotice();
 }
 
 function clearRoute() {
-  clearRouteDisplayOnly();
-  blockedRoads.clear();
-  document.querySelectorAll('.map-edge').forEach(e => e.classList.remove('blocked'));
-  updateHazardUI();
-  updateNodeHighlights();
+  reopenAllRoads();
+  closeBenchmarkDrawer();
 }
 
 async function runBenchmark() {
   selectedStart = document.getElementById('selectStart').value;
   selectedTarget = document.getElementById('selectTarget').value;
+  const metric = document.getElementById('selectMetric').value;
   if (!selectedStart || !selectedTarget) return;
 
-  const resA = solveRouteClient(selectedStart, selectedTarget, 'astar', 'distance');
-  const resD = solveRouteClient(selectedStart, selectedTarget, 'dijkstra', 'distance');
+  let resA = null, resD = null;
+  if (isServerConnected) {
+    try {
+      const payload = (algo) => JSON.stringify({
+        map: activeMap,
+        start: selectedStart,
+        target: selectedTarget,
+        algo,
+        metric,
+        blockedRoads: Array.from(closedRoads),
+      });
+      const [rA, rD] = await Promise.all([
+        fetch('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload('astar') }),
+        fetch('/api/route', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload('dijkstra') }),
+      ]);
+      if (rA.ok && rD.ok) {
+        resA = await rA.json();
+        resD = await rD.json();
+      }
+    } catch (_) {
+      // Fall back to client solver below
+    }
+  }
+
+  if (!resA || !resD) {
+    resA = solveRouteClient(selectedStart, selectedTarget, 'astar', metric);
+    resD = solveRouteClient(selectedStart, selectedTarget, 'dijkstra', metric);
+  }
 
   const drawer = document.getElementById('comparisonDrawer');
-  const table = document.getElementById('benchmarkTable');
+  const tbody = document.getElementById('benchmarkTable');
+  const summary = document.getElementById('comparisonSummary');
 
-  table.innerHTML = `
-    <div class="bench-card">
-      <div class="bench-card-title">⚡ A* Algorithm (Heuristic Guided)</div>
-      <div class="bench-row"><span>Compute Latency</span><span>${resA.executionMicroseconds} µs</span></div>
-      <div class="bench-row"><span>Nodes Explored</span><span>${resA.nodesExplored} nodes</span></div>
-      <div class="bench-row"><span>Total Distance</span><span>${resA.totalDistance.toFixed(0)} m</span></div>
-      <div class="bench-row"><span>Path Hops</span><span>${resA.pathNodes.length} nodes</span></div>
-    </div>
-    <div class="bench-card">
-      <div class="bench-card-title">🔍 Dijkstra (Exhaustive Frontier)</div>
-      <div class="bench-row"><span>Compute Latency</span><span>${resD.executionMicroseconds} µs</span></div>
-      <div class="bench-row"><span>Nodes Explored</span><span>${resD.nodesExplored} nodes</span></div>
-      <div class="bench-row"><span>Total Distance</span><span>${resD.totalDistance.toFixed(0)} m</span></div>
-      <div class="bench-row"><span>Path Hops</span><span>${resD.pathNodes.length} nodes</span></div>
-    </div>
-    <div class="bench-card">
-      <div class="bench-card-title">🏆 Efficiency Gain</div>
-      <div class="bench-row"><span>Search Space Pruning</span><span style="color: #10b981;">${resD.nodesExplored > 0 ? (((resD.nodesExplored - resA.nodesExplored) / resD.nodesExplored) * 100).toFixed(1) : 0}%</span></div>
-      <div class="bench-row"><span>Optimality Verification</span><span style="color: #38bdf8;">${Math.abs(resA.totalDistance - resD.totalDistance) < 1 ? '100% Identical Shortest' : 'Suboptimal'}</span></div>
-      <div class="bench-row"><span>Detours Avoided</span><span>${blockedRoads.size} obstacles</span></div>
-    </div>
-  `;
+  const rows = [
+    { name: 'Smart search (A*)', res: resA },
+    { name: 'Exhaustive (Dijkstra)', res: resD },
+  ];
 
-  drawer.classList.add('open');
+  tbody.innerHTML = rows.map(({ name, res }) => `
+    <tr>
+      <td>${name}</td>
+      <td class="num">${res.nodesExplored}</td>
+      <td class="num">${formatLatency(res.executionMicroseconds)}</td>
+      <td class="num">${res.success ? formatDistance(res.totalDistance) : '-'}</td>
+      <td class="num">${res.success ? res.pathNodes.length : '-'}</td>
+    </tr>
+  `).join('');
+
+  if (resA.success && resD.success && resD.nodesExplored > 0) {
+    const savedPct = Math.round(((resD.nodesExplored - resA.nodesExplored) / resD.nodesExplored) * 100);
+    const sameDist = Math.abs(resA.totalDistance - resD.totalDistance) < 1;
+    summary.textContent = savedPct > 0
+      ? `A* checked ${savedPct}% fewer places than Dijkstra${sameDist ? ' and found the same shortest route.' : '.'}`
+      : 'Both searches checked the same number of places for this route.';
+  } else {
+    summary.textContent = 'No open route connects these two places.';
+  }
+
+  drawer.hidden = false;
 }
 
 function closeBenchmarkDrawer() {
-  document.getElementById('comparisonDrawer').classList.remove('open');
+  document.getElementById('comparisonDrawer').hidden = true;
 }
 
-// Client-side fallback solver (in pure JS) ensuring standalone usability
+function showNotice(text) {
+  const el = document.getElementById('routeNotice');
+  document.getElementById('routeNoticeText').textContent = text;
+  el.hidden = false;
+}
+
+function hideNotice() {
+  document.getElementById('routeNotice').hidden = true;
+}
+
+// Client-side solver matching the C++ PathFinder & NavigationEngine logic
 function solveRouteClient(startId, targetId, algo, metric) {
   const t0 = performance.now();
-  const nodeMap = new Map();
-  graphData.nodes.forEach(n => nodeMap.set(n.id, n));
+  const nodeMap = new Map(graphData.nodes.map((n) => [n.id, n]));
+  const adj = new Map(graphData.nodes.map((n) => [n.id, []]));
 
-  const adj = new Map();
-  graphData.nodes.forEach(n => adj.set(n.id, []));
+  // Derive scale from the loaded map so the A* heuristic is always admissible.
+  let minMetresPerUnit = Infinity;
+  let maxSpeedKmh = 0;
 
-  graphData.edges.forEach(edge => {
-    if (blockedRoads.has(edge.id)) return;
-    adj.get(edge.from).push(edge);
-    if (!edge.isOneWay) {
-      adj.get(edge.to).push({ ...edge, from: edge.to, to: edge.from });
+  graphData.edges.forEach((edge) => {
+    if (edge.speedLimit > maxSpeedKmh) maxSpeedKmh = edge.speedLimit;
+    const a = nodeMap.get(edge.from);
+    const b = nodeMap.get(edge.to);
+    if (a && b) {
+      const units = Math.hypot(a.x - b.x, a.y - b.y);
+      if (units > 0) minMetresPerUnit = Math.min(minMetresPerUnit, edge.distance / units);
     }
+    if (closedRoads.has(edge.id)) return;
+    adj.get(edge.from)?.push(edge);
+    if (!edge.isOneWay) adj.get(edge.to)?.push({ ...edge, from: edge.to, to: edge.from });
   });
 
+  if (!Number.isFinite(minMetresPerUnit)) minMetresPerUnit = 0;
+  const maxSpeedMs = (maxSpeedKmh * 1000) / 3600;
   const targetNode = nodeMap.get(targetId);
+
   const heuristic = (id) => {
-    if (algo === 'dijkstra') return 0;
+    if (algo === 'dijkstra' || !targetNode) return 0;
     const n = nodeMap.get(id);
-    return Math.hypot(n.x - targetNode.x, n.y - targetNode.y);
+    const metres = Math.hypot(n.x - targetNode.x, n.y - targetNode.y) * minMetresPerUnit;
+    return metric === 'time' ? (maxSpeedMs > 0 ? metres / maxSpeedMs : 0) : metres;
   };
 
   const gScore = new Map();
@@ -502,14 +596,13 @@ function solveRouteClient(startId, targetId, algo, metric) {
   const distAccum = new Map();
   const timeAccum = new Map();
 
-  graphData.nodes.forEach(n => {
+  graphData.nodes.forEach((n) => {
     gScore.set(n.id, Infinity);
     fScore.set(n.id, Infinity);
   });
 
   gScore.set(startId, 0);
   fScore.set(startId, heuristic(startId));
-
   const openSet = [startId];
   let explored = 0;
   let found = false;
@@ -518,42 +611,35 @@ function solveRouteClient(startId, targetId, algo, metric) {
     openSet.sort((a, b) => fScore.get(a) - fScore.get(b));
     const curr = openSet.shift();
     explored++;
-
     if (curr === targetId) {
       found = true;
       break;
     }
-
-    const neighbors = adj.get(curr) || [];
-    for (const edge of neighbors) {
-      const cost = (metric === 'time')
-        ? (edge.distance / (edge.speedLimit * 1000 / 3600))
-        : edge.distance;
-
+    for (const edge of (adj.get(curr) || [])) {
+      const speedMs = edge.speedLimit > 0 ? (edge.speedLimit * 1000) / 3600 : 1.4;
+      const cost = metric === 'time' ? edge.distance / speedMs : edge.distance;
       const tentativeG = gScore.get(curr) + cost;
       if (tentativeG < gScore.get(edge.to)) {
         cameFrom.set(edge.to, curr);
         cameRoad.set(edge.to, edge.id);
         distAccum.set(edge.to, edge.distance);
-        timeAccum.set(edge.to, edge.distance / (edge.speedLimit * 1000 / 3600));
-
+        timeAccum.set(edge.to, edge.distance / speedMs);
         gScore.set(edge.to, tentativeG);
         fScore.set(edge.to, tentativeG + heuristic(edge.to));
-
-        if (!openSet.includes(edge.to)) {
-          openSet.push(edge.to);
-        }
+        if (!openSet.includes(edge.to)) openSet.push(edge.to);
       }
     }
   }
 
-  const t1 = performance.now();
+  const elapsedUs = Math.round((performance.now() - t0) * 1000);
   if (!found) {
     return {
       success: false,
-      statusMessage: 'No route found. Try clearing active road closures.',
       nodesExplored: explored,
-      executionMicroseconds: Math.round((t1 - t0) * 1000)
+      executionMicroseconds: elapsedUs,
+      pathNodes: [],
+      pathRoads: [],
+      directions: [],
     };
   }
 
@@ -574,60 +660,115 @@ function solveRouteClient(startId, targetId, algo, metric) {
   pathNodes.reverse();
   pathRoads.reverse();
 
-  // Generate directions
-  const directions = [];
-  for (let i = 0; i < pathNodes.length; i++) {
-    const n = nodeMap.get(pathNodes[i]);
-    if (i === 0) {
-      directions.push({
-        step: 1,
-        action: 'Depart',
-        instruction: `Depart from ${n.name}`
-      });
-    } else if (i === pathNodes.length - 1) {
-      directions.push({
-        step: i + 1,
-        action: 'Arrive',
-        instruction: `Arrive at destination: ${n.name}`
-      });
-    } else {
-      directions.push({
-        step: i + 1,
-        action: 'Continue Straight',
-        instruction: `At ${n.name}, continue along route`
-      });
-    }
-  }
+  const edgeLookup = new Map(graphData.edges.map((e) => [e.id, e]));
+  const directions = buildTurnDirections(pathNodes, pathRoads, nodeMap, edgeLookup);
 
   return {
     success: true,
-    algorithm: algo === 'astar' ? 'A* (Euclidean)' : 'Dijkstra',
+    algorithm: algo === 'astar' ? 'A*' : 'Dijkstra',
     start: startId,
     target: targetId,
     totalDistance: totalDist,
     totalTimeSeconds: totalTime,
     nodesExplored: explored,
-    executionMicroseconds: Math.round((t1 - t0) * 1000),
-    pathNodes: pathNodes,
-    pathRoads: pathRoads,
-    directions: directions
+    executionMicroseconds: elapsedUs,
+    pathNodes,
+    pathRoads,
+    directions,
   };
 }
 
-// Pan and Zoom Implementation
+function buildTurnDirections(pathNodes, pathRoads, nodeMap, edgeLookup) {
+  const STRAIGHT_DEG = 25;
+  const U_TURN_DEG = 155;
+  const steps = [];
+
+  if (pathNodes.length === 0) return steps;
+  const startNode = nodeMap.get(pathNodes[0]);
+  if (pathNodes.length === 1) {
+    return [{ step: 1, instruction: `You are already at ${startNode.name}.`, segmentDistance: 0 }];
+  }
+
+  steps.push({
+    step: 1,
+    instruction: `Leave ${startNode.name} toward ${nodeMap.get(pathNodes[1]).name}`,
+    segmentDistance: 0,
+  });
+
+  for (let i = 1; i + 1 < pathNodes.length; i++) {
+    const prev = nodeMap.get(pathNodes[i - 1]);
+    const curr = nodeMap.get(pathNodes[i]);
+    const next = nodeMap.get(pathNodes[i + 1]);
+
+    const v1x = curr.x - prev.x, v1y = curr.y - prev.y;
+    const v2x = next.x - curr.x, v2y = next.y - curr.y;
+    const angleDeg = Math.atan2(v1x * v2y - v1y * v2x, v1x * v2x + v1y * v2y) * (180 / Math.PI);
+
+    let text;
+    if (Math.abs(angleDeg) < STRAIGHT_DEG) text = `Go straight past ${curr.name} toward ${next.name}`;
+    else if (Math.abs(angleDeg) > U_TURN_DEG) text = `Make a U-turn at ${curr.name} toward ${next.name}`;
+    else if (angleDeg > 0) text = `Turn right at ${curr.name} toward ${next.name}`;
+    else text = `Turn left at ${curr.name} toward ${next.name}`;
+
+    const road = edgeLookup.get(pathRoads[i - 1]);
+    steps.push({
+      step: i + 1,
+      instruction: text,
+      segmentDistance: road ? road.distance : Math.hypot(v1x, v1y),
+    });
+  }
+
+  const lastRoad = edgeLookup.get(pathRoads[pathRoads.length - 1]);
+  const dest = nodeMap.get(pathNodes[pathNodes.length - 1]);
+  steps.push({
+    step: pathNodes.length,
+    instruction: `Arrive at ${dest.name}`,
+    segmentDistance: lastRoad ? lastRoad.distance : 0,
+  });
+
+  return steps;
+}
+
+// Formatting helpers
+function formatDistance(metres) {
+  if (metres >= 1000) return `${(metres / 1000).toFixed(2)} km`;
+  return `${Math.round(metres)} m`;
+}
+
+function formatDuration(seconds) {
+  const total = Math.round(seconds);
+  if (total < 60) return `${total} s`;
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return secs > 0 ? `${mins} min ${secs} s` : `${mins} min`;
+}
+
+function formatLatency(us) {
+  if (!us || us <= 0) return '< 1 µs';
+  if (us >= 1000) return `${(us / 1000).toFixed(1)} ms`;
+  return `${us} µs`;
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+// Pan and Zoom
 function setupPanZoom() {
   const viewport = document.getElementById('svgViewport');
-  const svg = document.getElementById('mapSvg');
-
   viewport.addEventListener('wheel', (e) => {
     e.preventDefault();
-    const zoomFactor = e.deltaY < 0 ? 1.1 : 0.9;
-    zoomLevel = Math.max(0.5, Math.min(3.0, zoomLevel * zoomFactor));
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    zoomLevel = Math.max(0.5, Math.min(3.0, zoomLevel * factor));
     applyTransform();
   });
 
   viewport.addEventListener('mousedown', (e) => {
-    if (e.target.closest('.node-group') || e.target.closest('.map-edge')) return;
+    if (e.target.closest('.node-group') || e.target.closest('.map-edge') || e.target.closest('.map-controls')) return;
     isPanning = true;
     startPanX = e.clientX - panX;
     startPanY = e.clientY - panY;
@@ -646,12 +787,9 @@ function setupPanZoom() {
 }
 
 function applyTransform() {
-  const gLayers = ['gridLayer', 'edgesLayer', 'routeLayer', 'nodesLayer'];
-  gLayers.forEach(id => {
+  ['edgesLayer', 'routeLayer', 'nodesLayer'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) {
-      el.setAttribute('transform', `translate(${panX}, ${panY}) scale(${zoomLevel})`);
-    }
+    if (el) el.setAttribute('transform', `translate(${panX}, ${panY}) scale(${zoomLevel})`);
   });
 }
 

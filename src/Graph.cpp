@@ -2,8 +2,11 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <cmath>
+#include <limits>
 
-Graph::Graph() {}
+Graph::Graph()
+    : minMetresPerUnit(std::numeric_limits<double>::infinity()), maxSpeedKmh(0.0) {}
 
 void Graph::addLandmark(const Landmark& lm) {
     landmarks[lm.id] = lm;
@@ -22,6 +25,25 @@ void Graph::addEdge(const Edge& edge) {
         reverseEdge.to = edge.from;
         adjList[edge.to].push_back(reverseEdge);
     }
+
+    if (edge.speedLimit > maxSpeedKmh) maxSpeedKmh = edge.speedLimit;
+
+    auto a = landmarks.find(edge.from);
+    auto b = landmarks.find(edge.to);
+    if (a != landmarks.end() && b != landmarks.end()) {
+        double units = std::hypot(a->second.x - b->second.x, a->second.y - b->second.y);
+        if (units > 0.0) {
+            double ratio = edge.distance / units;
+            if (ratio < minMetresPerUnit) minMetresPerUnit = ratio;
+        }
+    }
+}
+
+double Graph::roadLength(const std::string& from, const std::string& roadId) const {
+    for (const auto& e : getNeighbors(from)) {
+        if (e.id == roadId) return e.distance;
+    }
+    return -1.0;
 }
 
 bool Graph::loadFromCSV(const std::string& nodesCsvPath, const std::string& edgesCsvPath) {

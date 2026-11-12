@@ -40,15 +40,20 @@ RouteResult PathFinder::findRouteAStar(const Graph& graph,
 
     const Landmark& targetLm = graph.getLandmark(targetId);
 
-    // Heuristic estimate: distance or time (assuming max speed 60 km/h = 16.67 m/s)
+    // Admissible heuristic, scaled from the map's own data rather than a fixed constant:
+    // straight-line coordinate distance x the smallest metres-per-unit ratio of any road is
+    // never longer than the real road distance. For time, divide by the fastest speed limit.
+    double metresPerUnit = graph.getMinMetresPerUnit();
+    if (!(metresPerUnit > 0.0) || std::isinf(metresPerUnit)) metresPerUnit = 0.0;
+    const double maxSpeedMs = graph.getMaxSpeedKmh() * 1000.0 / 3600.0;
+
     auto heuristic = [&](const std::string& nodeId) -> double {
         const Landmark& lm = graph.getLandmark(nodeId);
-        double dist = calculateEuclideanDistance(lm, targetLm);
+        double metres = calculateEuclideanDistance(lm, targetLm) * metresPerUnit;
         if (metric == CostMetric::FASTEST_TIME) {
-            // Admissible heuristic for time: dist / max_speed_allowed (16.67 m/s)
-            return dist / 16.67;
+            return maxSpeedMs > 0.0 ? metres / maxSpeedMs : 0.0;
         }
-        return dist;
+        return metres;
     };
 
     // Priority queue stores pair<fScore, nodeId>
